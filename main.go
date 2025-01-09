@@ -2,19 +2,27 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 )
+
+type Message struct {
+	from    string
+	payload []byte
+}
 
 type Server struct {
 	listenAddr string
 	listener   net.Listener
 	quitCh     chan struct{}
+	msgCh      chan Message
 }
 
 func NewServer(listenAddr string) *Server {
 	return &Server{
 		listenAddr: listenAddr,
 		quitCh:     make(chan struct{}),
+		msgCh:      make(chan Message, 10),
 	}
 }
 
@@ -30,6 +38,7 @@ func (s *Server) Start() error {
 	go s.acceptLoop()
 
 	<-s.quitCh
+	close(s.msgCh)
 
 	return nil
 }
@@ -59,12 +68,21 @@ func (s *Server) readLoop(conn net.Conn) {
 			fmt.Println("read error:", err)
 			continue
 		}
-		msg := buf[:n]
-		fmt.Println(string(msg))
+		s.msgCh <- Message{
+			from:    conn.RemoteAddr().String(),
+			payload: buf[:n],
+		}
 	}
 }
 
 func main() {
 	server := NewServer(":3000")
-	server.Start()
+
+	go func() {
+		for msg := range server.msgCh {
+			fmt.Printf("Message from connection (%s): %s", msg.from, string(msg.payload))
+		}
+	}()
+
+	log.Fatal(server.Start())
 }
